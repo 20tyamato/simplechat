@@ -1,26 +1,97 @@
 # lambda/index.py
-import base64
 import json
 import os
-import re  # 正規表現モジュールをインポート
-from urllib import error, request
-
-import boto3
-from botocore.exceptions import ClientError
+import re
+from urllib import request
 
 
-# Lambda コンテキストからリージョンを抽出する関数
+# Lambda context function - keep this
 def extract_region_from_arn(arn):
-    # ARN 形式: arn:aws:lambda:region:account-id:function:function-name
     match = re.search("arn:aws:lambda:([^:]+):", arn)
     if match:
         return match.group(1)
-    return "us-east-1"  # デフォルト値
+    return "us-east-1"  # Default value
 
 
+# Replace Bedrock client with your FastAPI endpoint URL
 FASTAPI_URL = os.environ.get(
-    "FASTAPI_URL", "https://your-colab-url.googleusercontent.com/predict"
+    "FASTAPI_URL", "https://d2sl5fkenz5erg.cloudfront.net/generate"
 )
+
+
+def lambda_handler(event, context):
+    try:
+        print("Received event:", json.dumps(event))
+        user_info = None
+        if "requestContext" in event and "authorizer" in event["requestContext"]:
+            user_info = event["requestContext"]["authorizer"]["claims"]
+            print(
+                f"Authenticated user: {user_info.get('email') or user_info.get('cognito:username')}"
+            )
+
+        print(f"Sending request to FastAPI endpoint: {FASTAPI_URL}")
+
+        request_payload = {
+            "prompt": "Hi, how are you?",
+            "max_new_tokens": 512,
+            "do_sample": False,
+            "temperature": 0.7,
+            "top_p": 0.9,
+        }
+
+        print("Calling FastAPI with payload:", json.dumps(request_payload))
+        req = request.Request(
+            FASTAPI_URL,
+            data=json.dumps(request_payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with request.urlopen(req) as response:
+            response_data = response.read().decode("utf-8")
+            response_body = json.loads(response_data)
+
+        print("FastAPI response:", json.dumps(response_body, default=str))
+
+        generated_text = response_body.get("generated_text", "")
+
+        return {
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+                "Access-Control-Allow-Methods": "OPTIONS,POST",
+            },
+            "body": json.dumps(
+                {
+                    "success": True,
+                    "response": generated_text,
+                    "conversationHistory": None,
+                }
+            ),
+        }
+
+    except Exception as error:
+        print("Error:", str(error))
+
+        return {
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+                "Access-Control-Allow-Methods": "OPTIONS,POST",
+            },
+            "body": json.dumps({"success": False, "error": str(error)}),
+        }
+
+
+# # Lambda コンテキストからリージョンを抽出する関数
+# def extract_region_from_arn(arn):
+#     # ARN 形式: arn:aws:lambda:region:account-id:function:function-name
+#     match = re.search("arn:aws:lambda:([^:]+):", arn)
+#     if match:
+#         return match.group(1)
+#     return "us-east-1"  # デフォルト値
 
 # # グローバル変数としてクライアントを初期化（初期値）
 # bedrock_client = None
