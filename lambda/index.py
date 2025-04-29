@@ -15,13 +15,15 @@ def extract_region_from_arn(arn):
 
 # Replace Bedrock client with your FastAPI endpoint URL
 FASTAPI_URL = os.environ.get(
-    "FASTAPI_URL", "https://d2sl5fkenz5erg.cloudfront.net/generate"
+    "FASTAPI_URL", "https://0415-34-91-45-106.ngrok-free.app/generate"
 )
 
 
 def lambda_handler(event, context):
     try:
         print("Received event:", json.dumps(event))
+
+        # Get authenticated user info if available
         user_info = None
         if "requestContext" in event and "authorizer" in event["requestContext"]:
             user_info = event["requestContext"]["authorizer"]["claims"]
@@ -29,17 +31,23 @@ def lambda_handler(event, context):
                 f"Authenticated user: {user_info.get('email') or user_info.get('cognito:username')}"
             )
 
+        body = json.loads(event["body"])
+        message = body["message"]
+        conversation_history = body.get("conversationHistory", [])
+
+        print("Processing message:", message)
         print(f"Sending request to FastAPI endpoint: {FASTAPI_URL}")
 
         request_payload = {
-            "prompt": "Hi, how are you?",
+            "prompt": message,
             "max_new_tokens": 512,
-            "do_sample": False,
+            "do_sample": True,
             "temperature": 0.7,
             "top_p": 0.9,
         }
 
         print("Calling FastAPI with payload:", json.dumps(request_payload))
+
         req = request.Request(
             FASTAPI_URL,
             data=json.dumps(request_payload).encode("utf-8"),
@@ -52,6 +60,9 @@ def lambda_handler(event, context):
         print("FastAPI response:", json.dumps(response_body, default=str))
 
         generated_text = response_body.get("generated_text", "")
+        messages = conversation_history.copy()
+        messages.append({"role": "user", "content": message})
+        messages.append({"role": "assistant", "content": generated_text})
 
         return {
             "statusCode": 200,
@@ -65,7 +76,7 @@ def lambda_handler(event, context):
                 {
                     "success": True,
                     "response": generated_text,
-                    "conversationHistory": None,
+                    "conversationHistory": messages,
                 }
             ),
         }
